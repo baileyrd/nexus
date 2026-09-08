@@ -146,7 +146,10 @@ pub(crate) fn find_duplicates(engine: &StorageEngine, args: &Value) -> Result<Va
         .filter(|(_, paths)| paths.len() > 1)
         .map(|(content_hash, mut paths)| {
             paths.sort();
-            NoteExactDuplicateGroup { content_hash, paths }
+            NoteExactDuplicateGroup {
+                content_hash,
+                paths,
+            }
         })
         .collect();
     exact.sort_by(|a, b| a.paths.first().cmp(&b.paths.first()));
@@ -166,7 +169,11 @@ pub(crate) fn find_duplicates(engine: &StorageEngine, args: &Value) -> Result<Va
                 } else {
                     (path_b.clone(), path_a.clone())
                 };
-                near.push(NoteNearDuplicatePair { a, b, similarity: sim });
+                near.push(NoteNearDuplicatePair {
+                    a,
+                    b,
+                    similarity: sim,
+                });
             }
         }
     }

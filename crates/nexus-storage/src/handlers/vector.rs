@@ -99,10 +99,7 @@ pub(crate) fn stored_signature(engine: &StorageEngine, args: &Value) -> Result<V
         .vector_stored_signature(&namespace, &file_path)
         .map_err(|e| exec_err(format!("vector_stored_signature: {e}")))?;
     let (content_hash, embedding_dim) = match signature {
-        Some((hash, dim)) => (
-            Some(hash),
-            Some(u32::try_from(dim).unwrap_or(u32::MAX)),
-        ),
+        Some((hash, dim)) => (Some(hash), Some(u32::try_from(dim).unwrap_or(u32::MAX))),
         None => (None, None),
     };
     to_value(

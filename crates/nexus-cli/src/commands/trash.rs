@@ -90,7 +90,10 @@ pub fn empty(app: &mut App, older_than_days: Option<u64>, force: bool) -> Result
         .map_err(|e| anyhow::anyhow!("failed to empty trash: {e}"))?;
     print_success(
         format,
-        &format!("removed {removed} trashed entr{}", if removed == 1 { "y" } else { "ies" }),
+        &format!(
+            "removed {removed} trashed entr{}",
+            if removed == 1 { "y" } else { "ies" }
+        ),
         &serde_json::json!({ "removed": removed }),
     );
     Ok(())

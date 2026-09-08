@@ -226,7 +226,9 @@ impl Store {
         match self.inner.lock() {
             Ok(guard) => guard,
             Err(poisoned) => {
-                tracing::error!("ai-runtime scheduler store mutex poisoned — recovering (see #199)");
+                tracing::error!(
+                    "ai-runtime scheduler store mutex poisoned — recovering (see #199)"
+                );
                 poisoned.into_inner()
             }
         }
@@ -241,7 +243,9 @@ impl Store {
         match self.session_to_task.lock() {
             Ok(guard) => guard,
             Err(poisoned) => {
-                tracing::error!("ai-runtime scheduler session map mutex poisoned — recovering (see #199)");
+                tracing::error!(
+                    "ai-runtime scheduler session map mutex poisoned — recovering (see #199)"
+                );
                 poisoned.into_inner()
             }
         }

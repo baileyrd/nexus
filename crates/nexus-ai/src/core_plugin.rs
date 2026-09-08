@@ -1952,7 +1952,9 @@ mod semantic_search_dispatch_tests {
         let fut = plugin
             .dispatch_async(HANDLER_SESSION_EXPORT, &serde_json::json!({ "id": "nope" }))
             .expect("HANDLER_SESSION_EXPORT must be async");
-        let err = fut.await.expect_err("exporting a missing session should error");
+        let err = fut
+            .await
+            .expect_err("exporting a missing session should error");
         assert!(
             format!("{err}").contains("no session found"),
             "expected a 'no session found' error, got: {err}"

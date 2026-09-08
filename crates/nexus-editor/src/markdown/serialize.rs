@@ -47,7 +47,10 @@ fn properties_to_yaml(props: &HashMap<String, PropertyValue>) -> serde_norway::V
 
     for key in RESERVED {
         if let Some(v) = props.get(*key) {
-            mapping.insert(serde_norway::Value::String((*key).into()), property_to_yaml(v));
+            mapping.insert(
+                serde_norway::Value::String((*key).into()),
+                property_to_yaml(v),
+            );
         }
     }
     let mut other_keys: Vec<&String> = props

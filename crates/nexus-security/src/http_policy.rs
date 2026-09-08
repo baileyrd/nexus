@@ -94,7 +94,11 @@ pub struct ValidatedRequest {
 ///
 /// # Errors
 /// Returns the specific [`HttpPolicyError`] for the first rule that fails.
-pub fn validate(method: &str, url: &str, policy: &HttpPolicy) -> Result<ValidatedRequest, HttpPolicyError> {
+pub fn validate(
+    method: &str,
+    url: &str,
+    policy: &HttpPolicy,
+) -> Result<ValidatedRequest, HttpPolicyError> {
     if !policy.enabled {
         return Err(HttpPolicyError::Disabled);
     }
@@ -167,7 +171,10 @@ pub async fn execute(
     // Reject early if the declared length already blows the cap.
     if let Some(len) = resp.content_length() {
         if len > max_bytes {
-            return Err(HttpPolicyError::TooLarge { max: max_bytes, got: len });
+            return Err(HttpPolicyError::TooLarge {
+                max: max_bytes,
+                got: len,
+            });
         }
     }
 
@@ -285,7 +292,10 @@ mod tests {
         // Missing fields fall back to defaults.
         let partial: HttpPolicy = serde_json::from_str("{\"enabled\":true}").unwrap();
         assert!(partial.enabled);
-        assert_eq!(partial.max_response_bytes, HttpPolicy::default().max_response_bytes);
+        assert_eq!(
+            partial.max_response_bytes,
+            HttpPolicy::default().max_response_bytes
+        );
     }
 
     /// Spawn a one-shot HTTP/1.1 server on a loopback port: reads (and
@@ -324,12 +334,8 @@ mod tests {
 
     #[tokio::test]
     async fn execute_returns_status_headers_and_body() {
-        let base = spawn_one_shot_server(
-            "200 OK",
-            b"hi there".to_vec(),
-            "X-Test: yes\r\n",
-            |_req| {},
-        );
+        let base =
+            spawn_one_shot_server("200 OK", b"hi there".to_vec(), "X-Test: yes\r\n", |_req| {});
         let req = ValidatedRequest {
             method: "GET".to_string(),
             url: Url::parse(&format!("{base}/hello")).unwrap(),
@@ -354,9 +360,15 @@ mod tests {
         };
         let mut headers = BTreeMap::new();
         headers.insert("x-api-key".to_string(), "secret".to_string());
-        let resp = execute(&req, &headers, Some("payload"), 1024, Duration::from_secs(5))
-            .await
-            .unwrap();
+        let resp = execute(
+            &req,
+            &headers,
+            Some("payload"),
+            1024,
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
         assert_eq!(resp.status, 201);
         let received = rx.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(received.contains("x-api-key: secret"), "got: {received}");

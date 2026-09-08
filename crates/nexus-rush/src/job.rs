@@ -102,7 +102,10 @@ pub fn init() {
         // itself never relies on SIGCHLD (it reaps via explicit waitpid/
         // wait_job calls throughout), so a no-op handler is behaviorally
         // inert here.
-        libc::signal(libc::SIGCHLD, ignore_job_signal as *const () as libc::sighandler_t);
+        libc::signal(
+            libc::SIGCHLD,
+            ignore_job_signal as *const () as libc::sighandler_t,
+        );
     }
 
     if enable {

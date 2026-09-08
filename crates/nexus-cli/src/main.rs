@@ -350,9 +350,11 @@ fn main() {
             ContentCommand::Links { path } => commands::content::links(&mut app, &path),
             ContentCommand::Backlinks { path } => commands::content::backlinks(&mut app, &path),
             ContentCommand::Daily { date } => commands::content::daily(&mut app, date.as_deref()),
-            ContentCommand::Export { path, output, format } => {
-                commands::content::export(&mut app, &path, output.as_deref(), &format)
-            }
+            ContentCommand::Export {
+                path,
+                output,
+                format,
+            } => commands::content::export(&mut app, &path, output.as_deref(), &format),
             ContentCommand::Duplicates { near_threshold } => {
                 commands::content::duplicates(&mut app, near_threshold)
             }
@@ -686,13 +688,9 @@ fn main() {
                 thread_id,
                 body,
                 author,
-            } => commands::comments::add_reply(
-                &mut app,
-                &path,
-                &thread_id,
-                &body,
-                author.as_deref(),
-            ),
+            } => {
+                commands::comments::add_reply(&mut app, &path, &thread_id, &body, author.as_deref())
+            }
             CommentsCommand::Resolve {
                 path,
                 thread_id,
@@ -1067,7 +1065,11 @@ mod tests {
             .expect("parse content export");
         match cli.command {
             Commands::Content(args) => match args.command {
-                ContentCommand::Export { path, output, format } => {
+                ContentCommand::Export {
+                    path,
+                    output,
+                    format,
+                } => {
                     assert_eq!(path, "note.md");
                     assert!(output.is_none());
                     assert_eq!(format, "html");
@@ -1112,7 +1114,14 @@ mod tests {
     #[test]
     fn parse_content_export_accepts_format_and_output_flags() {
         let cli = Cli::try_parse_from([
-            "nexus", "content", "export", "note.md", "--format", "docx", "--output", "note.docx",
+            "nexus",
+            "content",
+            "export",
+            "note.md",
+            "--format",
+            "docx",
+            "--output",
+            "note.docx",
         ])
         .expect("parse content export --format --output");
         match cli.command {
@@ -1184,8 +1193,8 @@ mod tests {
 
     #[test]
     fn parse_content_search_offset_sort_and_date_filter_default() {
-        let cli = Cli::try_parse_from(["nexus", "content", "search", "q"])
-            .expect("parse content search");
+        let cli =
+            Cli::try_parse_from(["nexus", "content", "search", "q"]).expect("parse content search");
         match cli.command {
             Commands::Content(args) => match args.command {
                 ContentCommand::Search {
@@ -1286,8 +1295,8 @@ mod tests {
 
     #[test]
     fn parse_ai_runtime_list_defaults_status_and_limit_to_none() {
-        let cli = Cli::try_parse_from(["nexus", "ai", "runtime", "list"])
-            .expect("parse ai runtime list");
+        let cli =
+            Cli::try_parse_from(["nexus", "ai", "runtime", "list"]).expect("parse ai runtime list");
         match cli.command {
             Commands::Ai(args) => match args.command {
                 AiCommand::Runtime { command } => match command {

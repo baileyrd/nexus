@@ -105,11 +105,7 @@ fn encode_spaces(path: &str) -> String {
 /// targets `new_path`. Returns `None` when nothing changed, else the
 /// rewritten content and the number of link occurrences updated.
 #[must_use]
-pub fn rewrite_links(
-    content: &str,
-    old_path: &str,
-    new_path: &str,
-) -> Option<(String, usize)> {
+pub fn rewrite_links(content: &str, old_path: &str, new_path: &str) -> Option<(String, usize)> {
     let old = OldForms::new(old_path);
     let mut replaced = 0usize;
 
@@ -124,9 +120,7 @@ pub fn rewrite_links(
                 let inner = &content[start..start + rel];
                 // Target = inner up to the first `#` (fragment) or `|`
                 // (alias); the remainder is preserved verbatim.
-                let cut = inner
-                    .find(['#', '|'])
-                    .unwrap_or(inner.len());
+                let cut = inner.find(['#', '|']).unwrap_or(inner.len());
                 let (target, rest) = inner.split_at(cut);
                 if old.matches(target) {
                     out.push_str("[[");
@@ -190,17 +184,19 @@ mod tests {
 
     #[test]
     fn stem_wikilink_rewrites_to_new_stem() {
-        let (out, n) =
-            rewrite_links("See [[Old Note]] here.", "notes/Old Note.md", "notes/New Note.md")
-                .unwrap();
+        let (out, n) = rewrite_links(
+            "See [[Old Note]] here.",
+            "notes/Old Note.md",
+            "notes/New Note.md",
+        )
+        .unwrap();
         assert_eq!(out, "See [[New Note]] here.");
         assert_eq!(n, 1);
     }
 
     #[test]
     fn stem_match_is_case_insensitive_like_resolve_link() {
-        let (out, _) =
-            rewrite_links("[[old note]]", "notes/Old Note.md", "notes/New.md").unwrap();
+        let (out, _) = rewrite_links("[[old note]]", "notes/Old Note.md", "notes/New.md").unwrap();
         assert_eq!(out, "[[New]]");
     }
 

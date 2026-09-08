@@ -1537,14 +1537,15 @@ mod tests {
         assert_eq!(
             soft_warn_for_sample(
                 "s1",
-                MemoryLimitAction::Ok {
-                    bytes: 100_000_000
-                },
+                MemoryLimitAction::Ok { bytes: 100_000_000 },
                 &mut warned,
             ),
             None,
         );
-        assert!(!warned.contains("s1"), "Ok sample should clear the debounce");
+        assert!(
+            !warned.contains("s1"),
+            "Ok sample should clear the debounce"
+        );
         // Crossing again after recovery should warn again.
         assert!(soft_warn_for_sample("s1", soft(), &mut warned).is_some());
     }
@@ -3164,7 +3165,10 @@ mod tests {
             {
                 break;
             }
-            assert!(std::time::Instant::now() < deadline, "never saw marker in buffer");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "never saw marker in buffer"
+            );
         }
 
         p.dispatch(HANDLER_CLOSE_SESSION, &serde_json::json!({ "id": id }))
@@ -3210,7 +3214,10 @@ mod tests {
             .unwrap_err();
         match err {
             PluginError::ExecutionFailed { reason, .. } => {
-                assert!(reason.contains("session store not attached"), "got: {reason}");
+                assert!(
+                    reason.contains("session store not attached"),
+                    "got: {reason}"
+                );
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -3253,7 +3260,10 @@ mod tests {
             .unwrap_err();
         match err {
             PluginError::ExecutionFailed { reason, .. } => {
-                assert!(reason.contains("session store not attached"), "got: {reason}");
+                assert!(
+                    reason.contains("session store not attached"),
+                    "got: {reason}"
+                );
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -3270,7 +3280,10 @@ mod tests {
         let mut p = TerminalCorePlugin::new().with_session_store(store);
 
         let resp = p
-            .dispatch(HANDLER_LOAD_TRANSCRIPT, &serde_json::json!({ "id": "alpha" }))
+            .dispatch(
+                HANDLER_LOAD_TRANSCRIPT,
+                &serde_json::json!({ "id": "alpha" }),
+            )
             .expect("load");
         let result: crate::LoadTranscriptResult = serde_json::from_value(resp).expect("decode");
         let text = result.text.expect("text should be Some");

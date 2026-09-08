@@ -749,10 +749,10 @@ mod tests {
         /// Seed a canned "already embedded" signature for `file_path`,
         /// as if a prior `index_file` call had already run.
         fn seed_stored(self, file_path: &str, content_hash: &str, embedding_dim: usize) -> Self {
-            self.stored
-                .lock()
-                .unwrap()
-                .insert(file_path.to_string(), (content_hash.to_string(), embedding_dim));
+            self.stored.lock().unwrap().insert(
+                file_path.to_string(),
+                (content_hash.to_string(), embedding_dim),
+            );
             self
         }
     }
@@ -825,7 +825,9 @@ mod tests {
                         .map_or(0, Vec::len);
                     self.stored.lock().unwrap().insert(path, (hash, dim));
                 }
-                Some(Box::pin(async move { Ok(serde_json::json!({ "ok": true })) }))
+                Some(Box::pin(
+                    async move { Ok(serde_json::json!({ "ok": true })) },
+                ))
             } else if target == "com.nexus.storage" && command == "vector_delete_by_file" {
                 let path = args
                     .get("path")
@@ -833,7 +835,9 @@ mod tests {
                     .unwrap_or("")
                     .to_string();
                 self.stored.lock().unwrap().remove(&path);
-                Some(Box::pin(async move { Ok(serde_json::json!({ "ok": true })) }))
+                Some(Box::pin(
+                    async move { Ok(serde_json::json!({ "ok": true })) },
+                ))
             } else {
                 None
             }
@@ -1580,10 +1584,7 @@ mod tests {
     #[tokio::test]
     async fn index_file_embeds_and_persists_content_hash_on_first_pass() {
         let mut blocks_by_path = HashMap::new();
-        blocks_by_path.insert(
-            "notes/a.md".to_string(),
-            vec![one_block(1, "hello world")],
-        );
+        blocks_by_path.insert("notes/a.md".to_string(), vec![one_block(1, "hello world")]);
         let dispatcher = Arc::new(StubDispatcher::with_blocks(Vec::new(), blocks_by_path));
         let embedder = StubEmbedder {
             vector: vec![0.1, 0.2],
@@ -1591,14 +1592,23 @@ mod tests {
         };
         let (ctx, _tmp) = make_ctx(dispatcher.clone());
 
-        let blocks = vec![(1u64, "paragraph".to_string(), "hello world".to_string(), None)];
+        let blocks = vec![(
+            1u64,
+            "paragraph".to_string(),
+            "hello world".to_string(),
+            None,
+        )];
         let outcome = index_file(&ctx, &embedder, "notes/a.md", &blocks)
             .await
             .expect("index_file ok");
 
         assert!(!outcome.skipped);
         assert_eq!(outcome.chunks, 1);
-        assert_eq!(embedder.seen.lock().unwrap().len(), 1, "embedder should run on first pass");
+        assert_eq!(
+            embedder.seen.lock().unwrap().len(),
+            1,
+            "embedder should run on first pass"
+        );
         assert!(
             dispatcher.stored.lock().unwrap().contains_key("notes/a.md"),
             "content hash should be persisted after the first embed",
@@ -1607,11 +1617,15 @@ mod tests {
 
     #[tokio::test]
     async fn index_file_skips_embedding_when_content_and_dimension_unchanged() {
-        let blocks = vec![(1u64, "paragraph".to_string(), "hello world".to_string(), None)];
+        let blocks = vec![(
+            1u64,
+            "paragraph".to_string(),
+            "hello world".to_string(),
+            None,
+        )];
         let hash = blocks_content_hash(&blocks);
-        let dispatcher = Arc::new(
-            StubDispatcher::new(Vec::new()).seed_stored("notes/a.md", &hash, 2),
-        );
+        let dispatcher =
+            Arc::new(StubDispatcher::new(Vec::new()).seed_stored("notes/a.md", &hash, 2));
         let embedder = StubEmbedder {
             vector: vec![0.1, 0.2], // dimension 2, matching the seeded signature
             seen: Mutex::new(Vec::new()),
@@ -1629,7 +1643,12 @@ mod tests {
             "embedder must not run when content + dimension are unchanged",
         );
         assert!(
-            dispatcher.seen.lock().unwrap().iter().all(|(_, cmd, _)| cmd != "vector_insert"),
+            dispatcher
+                .seen
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|(_, cmd, _)| cmd != "vector_insert"),
             "vector_insert must not be called when the embed step is skipped",
         );
     }
@@ -1639,9 +1658,8 @@ mod tests {
         let old_blocks = vec![(1u64, "paragraph".to_string(), "old text".to_string(), None)];
         let old_hash = blocks_content_hash(&old_blocks);
         let new_blocks = vec![(1u64, "paragraph".to_string(), "new text".to_string(), None)];
-        let dispatcher = Arc::new(
-            StubDispatcher::new(Vec::new()).seed_stored("notes/a.md", &old_hash, 2),
-        );
+        let dispatcher =
+            Arc::new(StubDispatcher::new(Vec::new()).seed_stored("notes/a.md", &old_hash, 2));
         let embedder = StubEmbedder {
             vector: vec![0.1, 0.2],
             seen: Mutex::new(Vec::new()),
@@ -1663,11 +1681,15 @@ mod tests {
         // different-dimension embedder (e.g. after a provider/model
         // switch) — must not be treated as a cache hit even though the
         // file's own content is unchanged.
-        let blocks = vec![(1u64, "paragraph".to_string(), "hello world".to_string(), None)];
+        let blocks = vec![(
+            1u64,
+            "paragraph".to_string(),
+            "hello world".to_string(),
+            None,
+        )];
         let hash = blocks_content_hash(&blocks);
-        let dispatcher = Arc::new(
-            StubDispatcher::new(Vec::new()).seed_stored("notes/a.md", &hash, 1536),
-        );
+        let dispatcher =
+            Arc::new(StubDispatcher::new(Vec::new()).seed_stored("notes/a.md", &hash, 1536));
         let embedder = StubEmbedder {
             vector: vec![0.1, 0.2, 0.3], // dimension 3 — mismatched
             seen: Mutex::new(Vec::new()),

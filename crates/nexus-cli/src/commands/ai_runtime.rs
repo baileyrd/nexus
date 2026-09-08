@@ -53,7 +53,14 @@ pub fn list(app: &mut App, status: Option<&str>, limit: Option<u32>) -> Result<(
         return Ok(());
     }
 
-    let headers = &["Task ID", "Kind", "Priority", "Status", "Caller", "Submitted"];
+    let headers = &[
+        "Task ID",
+        "Kind",
+        "Priority",
+        "Status",
+        "Caller",
+        "Submitted",
+    ];
     let rows: Vec<Vec<String>> = runs
         .iter()
         .map(|r| {
@@ -120,10 +127,7 @@ pub fn triggers(app: &mut App) -> Result<()> {
     let rows: Vec<Vec<String>> = triggers
         .iter()
         .map(|t| {
-            let enabled = t
-                .get("enabled")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
+            let enabled = t.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             vec![
                 str_field(t, "id"),
                 str_field(t, "name"),

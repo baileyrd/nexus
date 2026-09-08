@@ -117,7 +117,9 @@ pub fn run(app: &App) -> Result<()> {
 async fn wait_for_stop_signal() {
     #[cfg(unix)]
     {
-        let mut sigterm = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+        let mut sigterm = match tokio::signal::unix::signal(
+            tokio::signal::unix::SignalKind::terminate(),
+        ) {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!(error = %e, "nexus daemon: failed to install SIGTERM handler; Ctrl+C only");

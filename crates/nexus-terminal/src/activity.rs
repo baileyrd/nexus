@@ -65,8 +65,9 @@ pub(crate) fn build_activity_entry(
             limit_mb,
         } => {
             entry.outcome = ActivityOutcome::Ok;
-            entry.prompt =
-                format!("session {id} approaching memory limit: rss={rss_bytes} limit={limit_mb}MB");
+            entry.prompt = format!(
+                "session {id} approaching memory limit: rss={rss_bytes} limit={limit_mb}MB"
+            );
         }
         // Streaming / internal variants don't reach the activity log.
         // A rename is a UI-label tweak, not a session-boundary event, so

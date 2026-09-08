@@ -319,7 +319,10 @@ mod tests {
             !html.contains("title: My Note"),
             "raw YAML must not leak into the body, got:\n{html}"
         );
-        assert!(!html.contains("<hr"), "no bogus thematic break, got:\n{html}");
+        assert!(
+            !html.contains("<hr"),
+            "no bogus thematic break, got:\n{html}"
+        );
         assert!(html.contains("<h1>Body</h1>"));
     }
 
@@ -354,7 +357,10 @@ mod tests {
     #[test]
     fn image_embed_with_caption_uses_it_as_alt_text() {
         let html = export_to_html("![[diagram.png|Architecture Diagram]]", "T");
-        assert!(html.contains(r#"alt="Architecture Diagram""#), "got:\n{html}");
+        assert!(
+            html.contains(r#"alt="Architecture Diagram""#),
+            "got:\n{html}"
+        );
     }
 
     #[test]
@@ -375,7 +381,10 @@ mod tests {
             "got:\n{html}"
         );
         assert!(html.contains("Be careful"));
-        assert!(!html.contains("[!warning]"), "marker text must not leak, got:\n{html}");
+        assert!(
+            !html.contains("[!warning]"),
+            "marker text must not leak, got:\n{html}"
+        );
     }
 
     #[test]
@@ -391,7 +400,10 @@ mod tests {
     #[test]
     fn regular_image_syntax_is_unaffected_by_the_embed_rewrite() {
         let html = export_to_html("![alt text](photo.jpg)", "T");
-        assert!(html.contains(r#"<img src="photo.jpg" alt="alt text""#), "got:\n{html}");
+        assert!(
+            html.contains(r#"<img src="photo.jpg" alt="alt text""#),
+            "got:\n{html}"
+        );
     }
 
     #[test]
@@ -401,6 +413,9 @@ mod tests {
         // the rewritten embed.
         let html = export_to_html("café ![[café.png|é]] more café", "T");
         assert!(html.contains("café"), "got:\n{html}");
-        assert!(html.contains("<img "), "expected the embed to still become an <img>, got:\n{html}");
+        assert!(
+            html.contains("<img "),
+            "expected the embed to still become an <img>, got:\n{html}"
+        );
     }
 }

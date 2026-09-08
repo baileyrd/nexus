@@ -18,7 +18,10 @@ const PROBE_WAT: &str = include_str!("fixtures/http_request_probe.wat");
 
 const TEST_PLUGIN_ID: &str = "com.nexus.test.http-request-probe";
 
-fn build_probe(caps: CapabilitySet, network_policy: NetworkPolicy) -> (Store<PluginData>, Instance) {
+fn build_probe(
+    caps: CapabilitySet,
+    network_policy: NetworkPolicy,
+) -> (Store<PluginData>, Instance) {
     let wasm_bytes = wat::parse_str(PROBE_WAT).expect("parse http_request_probe.wat");
     let engine = Engine::default();
     let module = Module::new(&engine, &wasm_bytes).expect("compile probe module");

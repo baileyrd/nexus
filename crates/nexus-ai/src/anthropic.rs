@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AiError;
 use crate::provider::{
-    AiProvider, ChatMessage, ChatTurn, ChatTurnOutput, Role, ToolCall as ProviderToolCall, TokenUsage,
+    AiProvider, ChatMessage, ChatTurn, ChatTurnOutput, Role, TokenUsage,
+    ToolCall as ProviderToolCall,
 };
 use crate::tools::ToolSchema;
 
@@ -35,7 +36,10 @@ impl AnthropicProvider {
         self.cancel
             .lock()
             .ok()
-            .and_then(|g| g.as_ref().map(|f| f.load(std::sync::atomic::Ordering::Relaxed)))
+            .and_then(|g| {
+                g.as_ref()
+                    .map(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+            })
             .unwrap_or(false)
     }
 
@@ -113,10 +117,18 @@ struct AnthropicMessage<'a> {
 #[derive(Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum AnthropicSseEvent {
-    MessageStart { message: AnthropicSseMessageStart },
-    ContentBlockDelta { delta: AnthropicSseDelta },
-    MessageDelta { usage: Option<AnthropicSseOutputUsage> },
-    Error { error: serde_json::Value },
+    MessageStart {
+        message: AnthropicSseMessageStart,
+    },
+    ContentBlockDelta {
+        delta: AnthropicSseDelta,
+    },
+    MessageDelta {
+        usage: Option<AnthropicSseOutputUsage>,
+    },
+    Error {
+        error: serde_json::Value,
+    },
     #[serde(other)]
     Other,
 }
@@ -130,7 +142,9 @@ struct AnthropicSseMessageStart {
 #[derive(Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum AnthropicSseDelta {
-    TextDelta { text: String },
+    TextDelta {
+        text: String,
+    },
     #[serde(other)]
     Other,
 }

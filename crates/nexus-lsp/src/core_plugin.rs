@@ -869,16 +869,9 @@ impl CorePlugin for LspCorePlugin {
                     };
                     let server_name = server.name.clone();
                     let payload = json!({ "query": query });
-                    proxy_request(
-                        &pool,
-                        &cfg,
-                        &server_name,
-                        bus,
-                        "workspace/symbol",
-                        payload,
-                    )
-                    .await
-                    .map_err(map_client_err)
+                    proxy_request(&pool, &cfg, &server_name, bus, "workspace/symbol", payload)
+                        .await
+                        .map_err(map_client_err)
                 }))
             }
             _ => None,

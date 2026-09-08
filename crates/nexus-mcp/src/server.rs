@@ -2624,7 +2624,10 @@ impl NexusMcpServer {
         name = "nexus_entity_get",
         description = "Fetch a forge entity by canonical id or alias: type, aliases, description, and outgoing relations"
     )]
-    async fn entity_get(&self, Parameters(input): Parameters<EntityGetInput>) -> Json<EntityGetOutput> {
+    async fn entity_get(
+        &self,
+        Parameters(input): Parameters<EntityGetInput>,
+    ) -> Json<EntityGetOutput> {
         #[derive(Deserialize)]
         struct Rel {
             target: String,
@@ -2699,7 +2702,10 @@ impl NexusMcpServer {
             "entity_type": input.entity_type,
             "limit": input.limit,
         });
-        match self.storage_call::<SearchReply>("entity_search", args).await {
+        match self
+            .storage_call::<SearchReply>("entity_search", args)
+            .await
+        {
             Ok(reply) => {
                 let results: Vec<EntitySearchHit> = reply
                     .results

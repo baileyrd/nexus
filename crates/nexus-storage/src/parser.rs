@@ -988,8 +988,7 @@ mod tests {
 
     #[test]
     fn extract_task_tokens_only_honors_the_first_due_date() {
-        let (content, due, _) =
-            extract_task_tokens("Two dates due:2026-01-01 due:2026-02-02");
+        let (content, due, _) = extract_task_tokens("Two dates due:2026-01-01 due:2026-02-02");
         assert_eq!(content, "Two dates due:2026-02-02");
         assert_eq!(due.as_deref(), Some("2026-01-01"));
     }

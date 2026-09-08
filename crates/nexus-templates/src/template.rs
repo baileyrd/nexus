@@ -230,7 +230,12 @@ impl Template {
         let now = chrono::Local::now();
         for text in std::iter::once(self.body.as_str())
             .chain(self.meta.target_path.as_deref())
-            .chain(self.meta.parameters.iter().filter_map(|p| p.default.as_deref()))
+            .chain(
+                self.meta
+                    .parameters
+                    .iter()
+                    .filter_map(|p| p.default.as_deref()),
+            )
         {
             for name in tag_names(text) {
                 if let std::collections::btree_map::Entry::Vacant(e) = values.entry(name.clone()) {

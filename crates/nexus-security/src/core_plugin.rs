@@ -322,20 +322,20 @@ impl CorePlugin for SecurityCorePlugin {
         let args = args.clone();
         match handler_id {
             HANDLER_DOWNLOAD => Some(Box::pin(async move {
-                download_handler(config, args)
-                    .await
-                    .map_err(|reason| PluginError::ExecutionFailed {
+                download_handler(config, args).await.map_err(|reason| {
+                    PluginError::ExecutionFailed {
                         plugin_id: PLUGIN_ID.to_string(),
                         reason,
-                    })
+                    }
+                })
             })),
             HANDLER_HTTP_REQUEST => Some(Box::pin(async move {
-                http_request_handler(config, args)
-                    .await
-                    .map_err(|reason| PluginError::ExecutionFailed {
+                http_request_handler(config, args).await.map_err(|reason| {
+                    PluginError::ExecutionFailed {
                         plugin_id: PLUGIN_ID.to_string(),
                         reason,
-                    })
+                    }
+                })
             })),
             _ => None,
         }
@@ -720,7 +720,9 @@ mod tests {
     #[test]
     fn dispatch_async_declines_unknown_handlers() {
         let mut plugin = SecurityCorePlugin::with_probe(None, ok_probe());
-        assert!(plugin.dispatch_async(HANDLER_GET_SECRET, &json!({})).is_none());
+        assert!(plugin
+            .dispatch_async(HANDLER_GET_SECRET, &json!({}))
+            .is_none());
     }
 
     #[test]

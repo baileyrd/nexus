@@ -1290,7 +1290,10 @@ mod tests {
         let mut plugin = GitCorePlugin::new(downstream.path().to_path_buf(), None);
         plugin.on_init().unwrap();
         let resp = plugin
-            .dispatch(HANDLER_PULL, &json!({ "remote": "origin", "branch": "main" }))
+            .dispatch(
+                HANDLER_PULL,
+                &json!({ "remote": "origin", "branch": "main" }),
+            )
             .expect("pull ok");
         assert_eq!(resp["fast_forward"], serde_json::json!(true));
         assert!(resp["conflicts"].as_array().unwrap().is_empty());

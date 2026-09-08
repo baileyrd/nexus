@@ -98,7 +98,10 @@ pub fn reconcile(conn: &Connection, forge_root: &Path) -> Result<ReconcileDelta,
         let rel_path = &file.rel_path;
         let size_bytes = file.size_bytes;
 
-        if index_by_path.get(rel_path).is_some_and(|r| stat_unchanged(r, file)) {
+        if index_by_path
+            .get(rel_path)
+            .is_some_and(|r| stat_unchanged(r, file))
+        {
             continue;
         }
 
@@ -341,7 +344,9 @@ fn hash_file(abs_path: &Path) -> Result<String, StorageError> {
 /// mismatch. Conservative: every excluded case falls through to the
 /// full hash-and-compare path, identical to pre-#373 behavior.
 fn stat_unchanged(record: &FileRecord, file: &DiskFile) -> bool {
-    !record.is_deleted && record.size_bytes == file.size_bytes && file.mtime_unix <= record.modified_at
+    !record.is_deleted
+        && record.size_bytes == file.size_bytes
+        && file.mtime_unix <= record.modified_at
 }
 
 /// Read `abs_path` as UTF-8, returning `None` (with a warning) if the file
